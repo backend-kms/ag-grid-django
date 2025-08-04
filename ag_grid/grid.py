@@ -5,6 +5,7 @@ class AgGrid:
     left_pinning = []
     right_pinning = []
     header_names = {}
+    selection_configs = {}
     form_fields = {}
 
     @classmethod
@@ -30,6 +31,10 @@ class AgGrid:
     @classmethod
     def get_header_names(cls):
         return cls.header_names
+    
+    @classmethod
+    def get_selection_configs(cls):
+        return cls.selection_configs
 
     @classmethod
     def get_form_fields(cls):

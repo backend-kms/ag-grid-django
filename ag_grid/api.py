@@ -159,6 +159,7 @@ class AgGridHeaderAPIView(APIView):
                         properties={
                             "field": openapi.Schema(type=openapi.TYPE_STRING, description="Field name"),
                             "headerName": openapi.Schema(type=openapi.TYPE_STRING, description="Header name"),
+                            "selectionConfigs": openapi.Schema(type=openapi.TYPE_OBJECT, description="Selection configs dictionary"),
                             "editable": openapi.Schema(type=openapi.TYPE_BOOLEAN, description="Is field editable"),
                             "sortable": openapi.Schema(type=openapi.TYPE_BOOLEAN, description="Is field sortable"),
                             "pinned": openapi.Schema(type=openapi.TYPE_STRING, enum=["left", "right"], description="Is field pinned"),
@@ -215,6 +216,7 @@ class AgGridHeaderAPIView(APIView):
                         headers.append({
                             "field": field_name,
                             "headerName": field.verbose_name.title() if hasattr(field, "verbose_name") else field_name.replace("_", " ").title(),
+                            "selectionConfigs": {},
                             "editable": editable,
                             "sortable": True,
                             "pinned": "left" if field_name == "id" else None,
@@ -248,10 +250,23 @@ class AgGridHeaderAPIView(APIView):
             headers = []
             model_fields = {f.name: f for f in model._meta.get_fields() if hasattr(f, "name")}
 
+            # Get selection configs if available
+            selection_configs = {}
+            if hasattr(config, "get_selection_configs") and callable(config.get_selection_configs):
+                selection_configs = config.get_selection_configs()
+
+
             # Process each field in the field list
             for field_name in field_list:
                 # Check if there's a custom header name for this field
                 custom_header = custom_headers.get(field_name)
+
+                #  Check if there's a custom labels for this field
+                selection_config = selection_configs.get(field_name, {})
+                unique_values = model.objects.values_list(field_name, flat=True).distinct()
+                if selection_config.get("type"):
+                    if not selection_config.get("labels"):
+                        selection_config["labels"] = unique_values
 
                 # Handle regular fields
                 if field_name in model_fields:
@@ -297,6 +312,7 @@ class AgGridHeaderAPIView(APIView):
                         {
                             "field": field.name,
                             "headerName": custom_header or (field.verbose_name.title() if hasattr(field, "verbose_name") else field.name.replace("_", " ").title()),
+                            "selectionConfigs": selection_config,
                             "editable": field.name in config.get_editable_fields(),
                             "sortable": field.name in config.get_sortable_fields(),
                             "pinned": "left" if field.name in config.get_left_pinning() else ("right" if field.name in config.get_right_pinning() else None),
@@ -343,6 +359,7 @@ class AgGridHeaderAPIView(APIView):
                                     {
                                         "field": field_name,
                                         "headerName": header_name,
+                                        "selectionConfigs": selection_config,
                                         "editable": field_name in config.get_editable_fields(),
                                         "sortable": field_name in config.get_sortable_fields(),
                                         "type": field_type,
@@ -361,6 +378,7 @@ class AgGridHeaderAPIView(APIView):
                                     {
                                         "field": field_name,
                                         "headerName": custom_header or field_name.replace("_", " ").title(),
+                                        "selectionConfigs": selection_config,
                                         "editable": field_name in config.get_editable_fields(),
                                         "sortable": field_name in config.get_sortable_fields(),
                                         "type": "text",
