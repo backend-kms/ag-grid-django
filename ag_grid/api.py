@@ -263,10 +263,6 @@ class AgGridHeaderAPIView(APIView):
 
                 #  Check if there's a custom labels for this field
                 selection_config = selection_configs.get(field_name, {})
-                unique_values = model.objects.values_list(field_name, flat=True).distinct()
-                if selection_config.get("type"):
-                    if not selection_config.get("labels"):
-                        selection_config["labels"] = unique_values
 
                 # Handle regular fields
                 if field_name in model_fields:
@@ -292,6 +288,10 @@ class AgGridHeaderAPIView(APIView):
                                 values.extend([str(getattr(obj, display_field)) for obj in objects])
                                 # Set cell editor params with these values
                                 cell_editor_params = {"values": values}
+
+                                if selection_config.get("type") and not selection_config.get("labels"):
+                                    id_display_pairs = [(str(obj.pk), str(getattr(obj, display_field))) for obj in objects]
+                                    selection_config["labels"] = [display_val for _, display_val in id_display_pairs]
                             else:
                                 # Fallback to using IDs if no display field is specified
                                 related_model = field.related_model
@@ -304,6 +304,10 @@ class AgGridHeaderAPIView(APIView):
                             values = [None] if field.null else []
                             values.extend([str(obj.id) for obj in related_model.objects.all()])
                             cell_editor_params = {"values": values}
+
+                            if selection_config.get("type") and not selection_config.get("labels"):
+                                objects = related_model.objects.all()
+                                selection_config["labels"] = [str(obj.pk) for obj in objects]
 
                         cell_renderer = "agTextCellRenderer"
 
@@ -1218,7 +1222,7 @@ class AgGridFilteredListView(APIView):
                 q_objects &= self._process_text_filter(key, filter_info)
 
         return queryset.filter(q_objects)
-
+    
     def _process_set_filter(self, key, filter_info):
         # Extract values from the filter info
         values = filter_info.get("values", [])
@@ -1231,16 +1235,41 @@ class AgGridFilteredListView(APIView):
         # Filter out real (non-null) values
         real_values = [v for v in values if v is not None and v != "null"]
 
+        model = self.get_model()
+        field_types = self.get_field_types()
+
         q_objects = Q()
 
-        # Apply __in lookup for non-null values
-        if real_values:
-            q_objects |= Q(**{f"{key}__in": real_values})
-        
+        if key in field_types and field_types[key] in ["ForeignKey", "OneToOneField"]:
+            field = model._meta.get_field(key)
+            related_model = field.related_model
+            config = self.get_config()
+
+            display_field = None
+            if config and hasattr(config, "get_fk_display_field") and callable(config.get_fk_display_field):
+                display_field = config.get_fk_display_field(key)
+
+            if display_field:
+                pk_values = list(
+                    related_model.objects
+                    .filter(**{f"{display_field}__in": real_values})
+                    .values_list("pk", flat=True)
+                )
+
+                if pk_values:
+                    q_objects |= Q(**{f"{key}__in": pk_values})
+                else:
+                    return Q(pk__in=[])
+
+        else:
+            # Apply __in lookup for non-null values
+            if real_values:
+                q_objects |= Q(**{f"{key}__in": real_values})
+            
         # Add __isnull condition if NULLs are included
         if null_included:
             q_objects |= Q(**{f"{key}__isnull": True})
-        
+
         return q_objects
 
     def _process_date_filter(self, key, filter_info, field_types):
