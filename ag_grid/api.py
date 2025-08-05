@@ -1203,9 +1203,12 @@ class AgGridFilteredListView(APIView):
             # Skip empty filters
             if not filter_info:
                 continue
-
+            
+            # Handle set filters (multi-select)
+            if isinstance(filter_info, dict) and ("filterType" in filter_info and filter_info["filterType"] == "set"):
+                q_objects &= self. _process_set_filter(key, filter_info)
             # Handle date filters
-            if isinstance(filter_info, dict) and ("filterType" in filter_info and filter_info["filterType"] == "date" or "dateFrom" in filter_info):
+            elif isinstance(filter_info, dict) and ("filterType" in filter_info and filter_info["filterType"] == "date" or "dateFrom" in filter_info):
                 q_objects &= self._process_date_filter(key, filter_info, field_types)
             # Handle number filters
             elif isinstance(filter_info, dict) and ("filterType" in filter_info and filter_info["filterType"] == "number"):
@@ -1215,6 +1218,30 @@ class AgGridFilteredListView(APIView):
                 q_objects &= self._process_text_filter(key, filter_info)
 
         return queryset.filter(q_objects)
+
+    def _process_set_filter(self, key, filter_info):
+        # Extract values from the filter info
+        values = filter_info.get("values", [])
+        if not values:
+            return Q()
+        
+        # Check if NULL values are included (None or "null" as string)
+        null_included = None in values or "null" in values
+
+        # Filter out real (non-null) values
+        real_values = [v for v in values if v is not None and v != "null"]
+
+        q_objects = Q()
+
+        # Apply __in lookup for non-null values
+        if real_values:
+            q_objects |= Q(**{f"{key}__in": real_values})
+        
+        # Add __isnull condition if NULLs are included
+        if null_included:
+            q_objects |= Q(**{f"{key}__isnull": True})
+        
+        return q_objects
 
     def _process_date_filter(self, key, filter_info, field_types):
         """Process date filters from AG Grid"""
