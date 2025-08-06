@@ -269,7 +269,7 @@ class AgGridHeaderAPIView(APIView):
                     field = model_fields[field_name]
                     internal_type = field.get_internal_type()
                     field_type = FIELD_TYPE_MAP.get(internal_type, "text")
-                    filter_type = FILTER_TYPE_MAP.get(internal_type, "agTextColumnFilter")
+                    filter_type = FILTER_TYPE_MAP.get(internal_type, "agTextColumnFilter") if not selection_config.get("type") else "agSetColumnFilter"
                     cell_renderer = CELL_RENDERER_MAP.get(internal_type, "agTextCellRenderer")
                     cell_editor_type = CELL_EDITOR_MAP.get(internal_type, "agTextCellEditor")
                     cell_editor_params = CELL_EDITOR_PARAM_MAP.get(internal_type, {})
@@ -349,7 +349,14 @@ class AgGridHeaderAPIView(APIView):
                                 # Create header for the related field
                                 internal_type = related_field.get_internal_type()
                                 field_type = FIELD_TYPE_MAP.get(internal_type, "text")
-                                filter_type = FILTER_TYPE_MAP.get(internal_type, "agTextColumnFilter")
+                                filter_type = FILTER_TYPE_MAP.get(internal_type, "agTextColumnFilter") if not selection_config.get("type") else "agSetColumnFilter"
+
+                                # Selection config for related fields
+                                if selection_config and selection_config.get("type"):
+                                    if selection_config.get("labels"):
+                                        selection_config["labels"] = [str(label) for label in selection_config["labels"]]
+                                    else:
+                                        selection_config["labels"] = [str(obj) for obj in related_model.objects.all()]
 
                                 # Use custom header if available, otherwise use default
                                 if custom_header:
