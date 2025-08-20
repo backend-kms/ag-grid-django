@@ -4,6 +4,7 @@ This README provides a comprehensive guide on integrating AG Grid with your Djan
 
 ## Table of Contents
 
+- Features
 - Installation
 - Basic Configuration
 - Model Registration
@@ -20,6 +21,16 @@ This README provides a comprehensive guide on integrating AG Grid with your Djan
   - Asynchronized Excel Export & Notification
 - Troubleshooting
 
+## Features
+
+- 🚀 **Real-time Updates**: WebSocket-based live data synchronization
+- 📊 **Advanced Filtering**: Server-side filtering with AG Grid compatibility
+- 📈 **Excel Export**: Configurable Excel export with custom formatting
+- 🔐 **Permission System**: Django-based permission integration
+- 🔔 **Notifications**: Built-in notification system for user alerts
+- 📝 **Change Logging**: Comprehensive audit trail for all operations
+- 🎨 **Customizable**: Flexible configuration for headers, fields, and display options
+
 ## Installation
 
 ### 1. Install the package
@@ -35,7 +46,7 @@ pip install ag-grid-django
 INSTALLED_APPS = [
     # ...
     'ag_grid',
-    'ag_grid.contirb.notification', # optional, if realtime notification is used
+    'ag_grid.contirb.notification', # optional, for notifications
     # ...
 ]
 ```
@@ -50,6 +61,12 @@ pip install drf-yasg  # For Swagger documentation
 - openpyxl - excel export
 - daphne
 - channels, channels_redis - socket notification
+
+### 4. Run migrations
+
+```bash
+python manage.py migrate
+```
 
 ## Basic Configuration
 
@@ -451,6 +468,36 @@ CELL_EDITOR_MAP = {
     "ForeignKey": "agSelectCellEditor",
 }
 ```
+
+### Selection Configurations
+
+You can configure selection options for fields using the `selection_configs` attribute. This is particularly useful for fields that should be displayed as radio buttons or dropdowns with predefined choices:
+
+```python
+@register(Product)
+class ProductAG(AgGrid):
+    list_display = ("id", "name", "status", "category", "column_name")
+
+    selection_configs = {
+        # 1. Auto-collect all available choices (all distinct values from database)
+        "column_name": {
+            "type": "radio" or "checkbox"
+        },
+    }
+```
+
+**Configuration Options:**
+
+- **Auto-collection**: When only `type` is specified, the system automatically collects all distinct values from the database for that field
+- **Custom labels**: When `labels` array is provided, these predefined options are used instead of auto-collected values
+- **Types supported**: `"radio"`, `"select"`, `"checkbox"` (for multiple selections)
+
+**Use Cases:**
+
+- Status fields with predefined states
+- Priority levels
+- Category selections
+- Any field where you want to limit user input to specific choices
 
 ### Change Logging
 
