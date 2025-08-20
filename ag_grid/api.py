@@ -159,6 +159,7 @@ class AgGridHeaderAPIView(APIView):
                         properties={
                             "field": openapi.Schema(type=openapi.TYPE_STRING, description="Field name"),
                             "headerName": openapi.Schema(type=openapi.TYPE_STRING, description="Header name"),
+                            "selectionConfigs": openapi.Schema(type=openapi.TYPE_OBJECT, description="Selection configs dictionary"),
                             "editable": openapi.Schema(type=openapi.TYPE_BOOLEAN, description="Is field editable"),
                             "sortable": openapi.Schema(type=openapi.TYPE_BOOLEAN, description="Is field sortable"),
                             "pinned": openapi.Schema(type=openapi.TYPE_STRING, enum=["left", "right"], description="Is field pinned"),
@@ -215,6 +216,7 @@ class AgGridHeaderAPIView(APIView):
                         headers.append({
                             "field": field_name,
                             "headerName": field.verbose_name.title() if hasattr(field, "verbose_name") else field_name.replace("_", " ").title(),
+                            "selectionConfigs": {},
                             "editable": editable,
                             "sortable": True,
                             "pinned": "left" if field_name == "id" else None,
@@ -248,17 +250,26 @@ class AgGridHeaderAPIView(APIView):
             headers = []
             model_fields = {f.name: f for f in model._meta.get_fields() if hasattr(f, "name")}
 
+            # Get selection configs if available
+            selection_configs = {}
+            if hasattr(config, "get_selection_configs") and callable(config.get_selection_configs):
+                selection_configs = config.get_selection_configs()
+
+
             # Process each field in the field list
             for field_name in field_list:
                 # Check if there's a custom header name for this field
                 custom_header = custom_headers.get(field_name)
+
+                #  Check if there's a custom labels for this field
+                selection_config = selection_configs.get(field_name, {})
 
                 # Handle regular fields
                 if field_name in model_fields:
                     field = model_fields[field_name]
                     internal_type = field.get_internal_type()
                     field_type = FIELD_TYPE_MAP.get(internal_type, "text")
-                    filter_type = FILTER_TYPE_MAP.get(internal_type, "agTextColumnFilter")
+                    filter_type = FILTER_TYPE_MAP.get(internal_type, "agTextColumnFilter") if not selection_config.get("type") else "agSetColumnFilter"
                     cell_renderer = CELL_RENDERER_MAP.get(internal_type, "agTextCellRenderer")
                     cell_editor_type = CELL_EDITOR_MAP.get(internal_type, "agTextCellEditor")
                     cell_editor_params = CELL_EDITOR_PARAM_MAP.get(internal_type, {})
@@ -277,6 +288,10 @@ class AgGridHeaderAPIView(APIView):
                                 values.extend([str(getattr(obj, display_field)) for obj in objects])
                                 # Set cell editor params with these values
                                 cell_editor_params = {"values": values}
+
+                                if selection_config.get("type") and not selection_config.get("labels"):
+                                    id_display_pairs = [(str(obj.pk), str(getattr(obj, display_field))) for obj in objects]
+                                    selection_config["labels"] = [display_val for _, display_val in id_display_pairs]
                             else:
                                 # Fallback to using IDs if no display field is specified
                                 related_model = field.related_model
@@ -290,6 +305,10 @@ class AgGridHeaderAPIView(APIView):
                             values.extend([str(obj.id) for obj in related_model.objects.all()])
                             cell_editor_params = {"values": values}
 
+                            if selection_config.get("type") and not selection_config.get("labels"):
+                                objects = related_model.objects.all()
+                                selection_config["labels"] = [str(obj.pk) for obj in objects]
+
                         cell_renderer = "agTextCellRenderer"
 
                     # Add the column definition
@@ -297,6 +316,7 @@ class AgGridHeaderAPIView(APIView):
                         {
                             "field": field.name,
                             "headerName": custom_header or (field.verbose_name.title() if hasattr(field, "verbose_name") else field.name.replace("_", " ").title()),
+                            "selectionConfigs": selection_config,
                             "editable": field.name in config.get_editable_fields(),
                             "sortable": field.name in config.get_sortable_fields(),
                             "pinned": "left" if field.name in config.get_left_pinning() else ("right" if field.name in config.get_right_pinning() else None),
@@ -329,7 +349,14 @@ class AgGridHeaderAPIView(APIView):
                                 # Create header for the related field
                                 internal_type = related_field.get_internal_type()
                                 field_type = FIELD_TYPE_MAP.get(internal_type, "text")
-                                filter_type = FILTER_TYPE_MAP.get(internal_type, "agTextColumnFilter")
+                                filter_type = FILTER_TYPE_MAP.get(internal_type, "agTextColumnFilter") if not selection_config.get("type") else "agSetColumnFilter"
+
+                                # Selection config for related fields
+                                if selection_config and selection_config.get("type"):
+                                    if selection_config.get("labels"):
+                                        selection_config["labels"] = [str(label) for label in selection_config["labels"]]
+                                    else:
+                                        selection_config["labels"] = [str(obj) for obj in related_model.objects.all()]
 
                                 # Use custom header if available, otherwise use default
                                 if custom_header:
@@ -343,6 +370,7 @@ class AgGridHeaderAPIView(APIView):
                                     {
                                         "field": field_name,
                                         "headerName": header_name,
+                                        "selectionConfigs": selection_config,
                                         "editable": field_name in config.get_editable_fields(),
                                         "sortable": field_name in config.get_sortable_fields(),
                                         "type": field_type,
@@ -361,6 +389,7 @@ class AgGridHeaderAPIView(APIView):
                                     {
                                         "field": field_name,
                                         "headerName": custom_header or field_name.replace("_", " ").title(),
+                                        "selectionConfigs": selection_config,
                                         "editable": field_name in config.get_editable_fields(),
                                         "sortable": field_name in config.get_sortable_fields(),
                                         "type": "text",
@@ -1185,9 +1214,12 @@ class AgGridFilteredListView(APIView):
             # Skip empty filters
             if not filter_info:
                 continue
-
+            
+            # Handle set filters (multi-select)
+            if isinstance(filter_info, dict) and ("filterType" in filter_info and filter_info["filterType"] == "set"):
+                q_objects &= self. _process_set_filter(key, filter_info)
             # Handle date filters
-            if isinstance(filter_info, dict) and ("filterType" in filter_info and filter_info["filterType"] == "date" or "dateFrom" in filter_info):
+            elif isinstance(filter_info, dict) and ("filterType" in filter_info and filter_info["filterType"] == "date" or "dateFrom" in filter_info):
                 q_objects &= self._process_date_filter(key, filter_info, field_types)
             # Handle number filters
             elif isinstance(filter_info, dict) and ("filterType" in filter_info and filter_info["filterType"] == "number"):
@@ -1197,6 +1229,55 @@ class AgGridFilteredListView(APIView):
                 q_objects &= self._process_text_filter(key, filter_info)
 
         return queryset.filter(q_objects)
+    
+    def _process_set_filter(self, key, filter_info):
+        # Extract values from the filter info
+        values = filter_info.get("values", [])
+        if not values:
+            return Q()
+        
+        # Check if NULL values are included (None or "null" as string)
+        null_included = None in values or "null" in values
+
+        # Filter out real (non-null) values
+        real_values = [v for v in values if v is not None and v != "null"]
+
+        model = self.get_model()
+        field_types = self.get_field_types()
+
+        q_objects = Q()
+
+        if key in field_types and field_types[key] in ["ForeignKey", "OneToOneField"]:
+            field = model._meta.get_field(key)
+            related_model = field.related_model
+            config = self.get_config()
+
+            display_field = None
+            if config and hasattr(config, "get_fk_display_field") and callable(config.get_fk_display_field):
+                display_field = config.get_fk_display_field(key)
+
+            if display_field:
+                pk_values = list(
+                    related_model.objects
+                    .filter(**{f"{display_field}__in": real_values})
+                    .values_list("pk", flat=True)
+                )
+
+                if pk_values:
+                    q_objects |= Q(**{f"{key}__in": pk_values})
+                else:
+                    return Q(pk__in=[])
+
+        else:
+            # Apply __in lookup for non-null values
+            if real_values:
+                q_objects |= Q(**{f"{key}__in": real_values})
+            
+        # Add __isnull condition if NULLs are included
+        if null_included:
+            q_objects |= Q(**{f"{key}__isnull": True})
+
+        return q_objects
 
     def _process_date_filter(self, key, filter_info, field_types):
         """Process date filters from AG Grid"""

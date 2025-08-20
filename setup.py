@@ -1,11 +1,11 @@
 from setuptools import setup, find_packages
 
 setup(
-    name='ag-grid-django',
-    version='0.0.7.8',
+    name='ag-grid-django-kasie',
+    version='0.0.7.83',
     description='A Django app that integrates AG Grid for advanced data grid functionalities',
-    author='kyong',
-    author_email='kyong.dev@gmail.com',
+    author='kasie',
+    author_email='cod.kms@gmail.com',
     url='https://github.com/kyong-dev/ag-grid-django',
     # install_requires=['tqdm', 'pandas', 'scikit-learn',],
     packages=find_packages(exclude=[]),
